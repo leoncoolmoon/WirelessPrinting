@@ -1,6 +1,7 @@
 // Required: https://github.com/greiman/SdFat
-
+#include <Arduino.h>
 #include <ArduinoOTA.h>
+#include "html_main.h"
 #if defined(ESP8266)
   #include <ESP8266mDNS.h>        // https://github.com/esp8266/Arduino/tree/master/libraries/ESP8266mDNS
 #elif defined(ESP32)
@@ -569,23 +570,13 @@ void setup() {
   // Main page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
       String uploadedName = uploadedFullname;
-  uploadedName.replace("/", "");
-    String message = "<h1>" + getDeviceName() + "</h1>"
-                     "<form enctype=\"multipart/form-data\" action=\"/api/files/local\" method=\"POST\">\n"
-                     "<p>You can also print from the command line using curl:</p>\n"
-                     "<pre>curl -F \"file=@/path/to/some.gcode\" -F \"print=true\" " + IpAddress2String(WiFi.localIP()) + "/api/files/local</pre>\n"
-                     "Choose a file to upload: <input name=\"file\" type=\"file\" accept=\".gcode,.GCODE,.gco,.GCO\"/><br/>\n"
-                     "<input type=\"checkbox\" name=\"print\" id = \"printImmediately\" value=\"true\" checked>\n"
-                     "<label for = \"printImmediately\">Print Immediately</label><br/>\n"
-                     "<input type=\"submit\" value=\"Upload\" />\n"
-                     "</form>"
-                     "<p><script>\nfunction startFunction(command) {\n  var xmlhttp = new XMLHttpRequest();\n  xmlhttp.open(\"POST\", \"/api/job\");\n  xmlhttp.setRequestHeader(\"Content-Type\", \"application/json\");\n  xmlhttp.send(JSON.stringify({command:command}));\n}\n</script>\n<button onclick=\"startFunction(\'cancel\')\">Cancel active print</button>\n<button onclick=\"startFunction(\'start\')\">Print " + uploadedName + "</button></p>\n"
-                     "<p><a href=\"/download\">Download " + uploadedName + "</a></p>"
-                     "<p><a href=\"/info\">Info</a></p>"
-                     "<hr>"
-                     "<p>WirelessPrinting <a href=\"https://github.com/probonopd/WirelessPrinting/commit/" + SKETCH_VERSION + "\">" + SKETCH_VERSION + "</a></p>\n"
+  uploadedName.replace("/", "");     
+          String message =  String((char *)index_html_gz) ;
+            message.replace("<!--##getDeviceName#-->",getDeviceName());
+            message.replace("<!--##uploadedName#-->",uploadedName);
+            message.replace("<!--##SKETCH_VERSION#-->",SKETCH_VERSION) ;
                     #ifdef OTA_UPDATES
-                      "<p>OTA Update Device: <a href=\"/update\">Click Here</a></p>"
+                     message .replace("<!--#OTA#-->", "<p>OTA Update Device: <a href=\"/update\">Click Here</a></p>");
                     #endif
                      ;
     request->send(200, "text/html", message);
