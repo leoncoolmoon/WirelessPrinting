@@ -8,6 +8,7 @@
   #include <ESPmDNS.h>
   #include <Update.h>
   #include <Hash.h>
+ 
 #endif
 #include <ArduinoJson.h>          // https://github.com/bblanchon/ArduinoJson (for implementing a subset of the OctoPrint API)
 #include <DNSServer.h>
@@ -18,9 +19,11 @@
 #include <SPIFFSEditor.h>
 
 #include "CommandQueue.h"
-
+ #if defined(ESP32CAM)
+    #include "stream.h"
+  #endif
 #include <NeoPixelBus.h>
-
+#define KEEPRETRYAFTERFAIL;
 const uint16_t PixelCount = 20; // this example assumes 4 pixels, making it smaller will cause a failure
 const uint8_t PixelPin = 2;  // make sure to set this to the correct pin, ignored for ESP8266 (there it is GPIO2 = D4)
 #define colorSaturation 255
@@ -49,6 +52,7 @@ WiFiServer telnetServer(23);
 WiFiClient serverClient;
 
 AsyncWebServer server(80);
+AsyncWebSocket webSocket("/ws");  //https://github.com/me-no-dev/ESPAsyncWebServer/blob/2f784268f0a358741ee6384480d48656e159d726/README.md#methods-for-sending-data-to-a-socket-client
 DNSServer dns;
 
 // Configurable parameters
@@ -65,7 +69,7 @@ DNSServer dns;
 const uint32_t serialBauds[] = { 115200, 250000, 57600 };    // Marlin valid bauds (removed very low bauds; roughly ordered by popularity to speed things up)
 
 #define API_VERSION     "0.1"
-#define VERSION         "1.3.10"
+#define VERSION         "1201"
 
 // The sketch on the ESP
 bool ESPrestartRequired;  // Set this flag in the callbacks to restart ESP
@@ -292,6 +296,13 @@ void handlePrint() {
     }
   }
 }
+void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *payload, size_t lenght)
+{ // When a WebSocket message is received
+uint8_t num = client->id();
+#ifdef ESP32CAM
+get_Imag(server,num);
+#endif
+}
 
 void handleUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
   static FileWrapper file;
@@ -447,16 +458,26 @@ bool detectPrinter() {
       if (commandQueue.isEmpty()) {
         String value = M115ExtractString(lastReceivedResponse, "MACHINE_TYPE");
         if (value == "") {
-          if (nM115++ >= REPEAT_M115_TIMES) {
-            nM115 = 0;
+          if (nM115<= REPEAT_M115_TIMES) {
             ++serialBaudIndex;
-            if (serialBaudIndex < sizeof(serialBauds) / sizeof(serialBauds[0]))
-              printerDetectionState = 10;
-            else
-              printerDetectionState = 0;   
+            printerDetectionState = (serialBaudIndex < sizeof(serialBauds) / sizeof(serialBauds[0]))? 10:0; 
+            nM115 = printerDetectionState == 0? nM115+1:nM115;
           } 
-          else
-            printerDetectionState = 10;      
+          else {
+           #ifdef KEEPRETRYAFTERFAIL
+              nM115 = 0;
+              printerDetectionState = 10;
+              break;
+           #endif
+            while(1){
+              // fail warning led
+              setLed(true);
+              delay(100);
+              setLed(false);
+              delay(200);
+            }
+          }
+              
         }
         else {
           telnetSend("Connected");
@@ -850,6 +871,8 @@ void setup() {
     request->send(200, "text/plain", "Received");
   }, handleUpload);
 
+  webSocket.onEvent(webSocketEvent);
+  server.addHandler(&webSocket);
   server.begin();
 
   #ifdef OTA_UPDATES
@@ -1011,10 +1034,9 @@ void loop() {
         temperatureTimer = curMillis + TEMPERATURE_REPORT_INTERVAL * 1000;
       }
     }
-  }
-
   SendCommands();
-  ReceiveResponses();
+  ReceiveResponses();    
+  }
 
   //*******************
   //* Telnet handling *
