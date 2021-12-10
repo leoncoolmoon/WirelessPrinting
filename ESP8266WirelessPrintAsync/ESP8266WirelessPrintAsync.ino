@@ -2,14 +2,25 @@
 #include <Arduino.h>
 #include <ArduinoOTA.h>
 #include "html_main.h"
+
 #if defined(ESP8266)
   #include <ESP8266mDNS.h>        // https://github.com/esp8266/Arduino/tree/master/libraries/ESP8266mDNS
 #elif defined(ESP32)
   #include <ESPmDNS.h>
   #include <Update.h>
   #include <Hash.h>
- 
 #endif
+/*
+//#define OLED 1;
+//local LCD 
+#ifdef OLED
+//i.e. wifi kit 8
+  #include <Wire.h>
+  #include <Adafruit_GFX.h>
+  #include <Adafruit_SSD1306.h>
+#endif
+//local LCD
+*/
 #include <ArduinoJson.h>          // https://github.com/bblanchon/ArduinoJson (for implementing a subset of the OctoPrint API)
 #include <DNSServer.h>
 #include "StorageFS.h"
@@ -23,7 +34,7 @@
     #include "stream.h"
   #endif
 #include <NeoPixelBus.h>
-#define KEEPRETRYAFTERFAIL;
+#define KEEPRETRYAFTERFAIL 1;
 const uint16_t PixelCount = 20; // this example assumes 4 pixels, making it smaller will cause a failure
 const uint8_t PixelPin = 2;  // make sure to set this to the correct pin, ignored for ESP8266 (there it is GPIO2 = D4)
 #define colorSaturation 255
@@ -32,7 +43,6 @@ RgbColor green(0, colorSaturation, 0);
 RgbColor blue(0, 0, colorSaturation);
 RgbColor white(colorSaturation);
 RgbColor black(0);
-
 #if defined(ESP8266)
   NeoPixelBus<NeoGrbFeature, NeoEsp8266Uart1Ws2813Method> strip(PixelCount); // ESP8266 always uses GPIO2 = D4
 #elif defined(ESP32)
@@ -54,7 +64,17 @@ WiFiClient serverClient;
 AsyncWebServer server(80);
 AsyncWebSocket webSocket("/ws");  //https://github.com/me-no-dev/ESPAsyncWebServer/blob/2f784268f0a358741ee6384480d48656e159d726/README.md#methods-for-sending-data-to-a-socket-client
 DNSServer dns;
-
+/*//Local LCD
+#ifdef OLED
+  #define I2C_SDA 4
+  #define I2C_SCL 5
+  #define SCREEN_WIDTH 128 // OLED display width, in pixels
+  #define SCREEN_HEIGHT 32 
+  TwoWire i2c = TwoWire();
+  Adafruit_SSD1306 oled;
+#endif
+//local LCD
+*/
 // Configurable parameters
 #define SKETCH_VERSION "2.x-localbuild" // Gets inserted at build time by .travis.yml
 #define USE_FAST_SD                     // Use Default fast SD clock, comment if your SD is an old or slow one.
@@ -224,7 +244,16 @@ inline bool parsePosition(const String response) {
 }
 
 inline void lcd(const String text) {
-  commandQueue.push("M117 " + text);
+  if(printerConnected) {
+    commandQueue.push("M117 " + text);
+    }
+  /* #ifdef OLED
+      oled.fillRect(1, 21, 128, 32, BLACK);
+      oled.setCursor(1, 21);
+      oled.println(text);
+      oled.display();
+      delay(1000);
+    #endif*/
 }
 
 inline void playSound() {
@@ -236,6 +265,7 @@ inline String getUploadedFilename() {
 }
 
 void handlePrint() {
+  //PrinterSerial.println(" handlePrint");
   static FileWrapper gcodeFile;
   static float prevM73Completion, prevM532Completion;
 
@@ -441,6 +471,8 @@ bool detectPrinter() {
       break;
 
     case 10:
+      //Serial.println("Connecting at " + String(serialBauds[serialBaudIndex]));
+      //delay(5000);
       // Initialize baud and send a request to printezr
       #ifdef ESP8266
       PrinterSerial.begin(serialBauds[serialBaudIndex]); // See note above; we have actually renamed Serial to Serial1
@@ -450,6 +482,8 @@ bool detectPrinter() {
       #endif
       telnetSend("Connecting at " + String(serialBauds[serialBaudIndex]));
       commandQueue.push("M115"); // M115 - Firmware Info
+      //lcd("push M115");
+      //Serial.println("push M115");
       printerDetectionState = 20;
       break;
 
@@ -543,6 +577,20 @@ inline String stringify(bool value) {
 }
 
 void setup() {
+ // Serial.begin(115200);
+//local LCD 
+/*#ifdef OLED
+    i2c.begin(I2C_SDA, I2C_SCL);
+    oled = Adafruit_SSD1306(SCREEN_WIDTH, SCREEN_HEIGHT, &i2c);
+    if(!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
+        Serial.println(F("SSD1306 allocation failed"));
+        }
+    oled.clearDisplay();
+    oled.setTextColor(WHITE);
+    lcd("OLED ready");
+#endif
+//local LCD
+*/
   #if defined(LED_BUILTIN)
     pinMode(LED_BUILTIN, OUTPUT);     // Initialize the LED_BUILTIN pin as an output
   #endif
@@ -552,7 +600,8 @@ void setup() {
   #else
     storageFS.begin(false);
   #endif
-
+//Serial.println("set-up temp");
+//lcd("set-up temp");
   for (int t = 0; t < MAX_SUPPORTED_EXTRUDERS; t++)
     toolTemperature[t] = { "0.0", "0.0" };
   bedTemperature = { "0.0", "0.0" };
@@ -562,6 +611,8 @@ void setup() {
   #ifdef OTA_UPDATES
     AsyncElegantOTA.begin(&server);
   #endif
+//  Serial.println("wifimanager");
+//  lcd("wifimanager");
   AsyncWiFiManager wifiManager(&server, &dns);
   // wifiManager.resetSettings();   // Uncomment this to reset the settings on the device, then you will need to reflash with USB and this commented out!
   wifiManager.setDebugOutput(false);  // So that it does not send stuff to the printer that the printer does not understand
@@ -570,7 +621,8 @@ void setup() {
 
   telnetServer.begin();
   telnetServer.setNoDelay(true);
-
+//Serial.println("set-up SPIFFS");
+//lcd("set-up SPIFFS");
   if (storageFS.activeSPIFFS()) {
     #if defined(ESP8266)
       server.addHandler(new SPIFFSEditor());
@@ -580,22 +632,24 @@ void setup() {
       #error Unsupported SOC
     #endif
   }
-
+//Serial.println("set-up upload filename");
+//lcd("set-up upload filename");
   initUploadedFilename();
-
+//Serial.println("set-up server");
+//lcd("set-up server");
   server.onNotFound([](AsyncWebServerRequest * request) {
     telnetSend("404 | Page '" + request->url() + "' not found");
-    request->send(404, "text/html", "<h1>Page not found!</h1>");
+    request->send(404, "text/html", String((char *)E404_html));
   });
 
   // Main page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
       String uploadedName = uploadedFullname;
   uploadedName.replace("/", "");     
-          String message =  String((char *)index_html_gz) ;
-            message.replace("<!--##getDeviceName#-->",getDeviceName());
-            message.replace("<!--##uploadedName#-->",uploadedName);
-            message.replace("<!--##SKETCH_VERSION#-->",SKETCH_VERSION) ;
+          String message =  String((char *)index_html) ;
+            message.replace("<!--#getDeviceName#-->",getDeviceName());
+            message.replace("<!--#uploadedName#-->",uploadedName);
+            message.replace("<!--#SKETCH_VERSION#-->",SKETCH_VERSION) ;
                     #ifdef OTA_UPDATES
                      message .replace("<!--#OTA#-->", "<p>OTA Update Device: <a href=\"/update\">Click Here</a></p>");
                     #endif
@@ -870,19 +924,28 @@ void setup() {
   server.on("/api/print", HTTP_POST, [](AsyncWebServerRequest * request) {
     request->send(200, "text/plain", "Received");
   }, handleUpload);
-
+//Serial.println("set-up websocket");
+//lcd("set-up websocket");
   webSocket.onEvent(webSocketEvent);
   server.addHandler(&webSocket);
   server.begin();
 
   #ifdef OTA_UPDATES
     // OTA setup
+   // Serial.println("set-up OTA name"+getDeviceName());
+   // lcd("set-up OTA name"+getDeviceName());
     ArduinoOTA.setHostname(getDeviceName().c_str());
     #ifdef OTA_PASSWORD
       ArduinoOTA.setPassword(OTA_PASSWORD);
     #endif
+//  Serial.println("OTA begin");
+ // lcd("OTA begin");
     ArduinoOTA.begin();
   #endif
+  //Serial.println("Serial off");
+  //lcd("Serial off");
+  //Serial.end();
+  //lcd("next is loop?");
 }
 
 inline void restartSerialTimeout() {
@@ -890,6 +953,7 @@ inline void restartSerialTimeout() {
 }
 
 void SendCommands() {
+  //PrinterSerial.println(" SendCommands");
   String command = commandQueue.peekSend();  //gets the next command to be sent
   if (command != "") {
     bool noResponsePending = commandQueue.isAckEmpty();
@@ -907,6 +971,8 @@ void SendCommands() {
 }
 
 void ReceiveResponses() {
+ //PrinterSerial.println("ReceiveResponses");
+
   static int lineStartPos;
   static String serialResponse;
 
@@ -954,6 +1020,7 @@ void ReceiveResponses() {
 
       int responseLength = serialResponse.length();
       telnetSend("<" + serialResponse.substring(lineStartPos, responseLength) + "#" + responseDetail + "#");
+      //PrinterSerial.println("<" + serialResponse.substring(lineStartPos, responseLength) + "#" + responseDetail + "#");
       if (incompleteResponse)
         lineStartPos = responseLength;
       else {
@@ -989,6 +1056,8 @@ void ReceiveResponses() {
 }
 
 void loop() {
+  //lcd("start loop" );
+  //Serial.println("Start loop");
   #ifdef OTA_UPDATES
     //****************
     //* OTA handling *
@@ -1001,13 +1070,17 @@ void loop() {
 
     ArduinoOTA.handle();
   #endif
-
+//Serial.print(printerConnected);
+//Serial.println("detect printer");
+//lcd("detect printer" );
   //********************
   //* Printer handling *
   //********************
-  if (!printerConnected)
-    printerConnected = detectPrinter();
-  else {
+  if (!printerConnected){
+ // Serial.println("detecting...");
+  printerConnected = detectPrinter();
+     }else {
+    //PrinterSerial.println(" printer already connected");
     #ifndef OTA_UPDATES
       MDNS.update();    // When OTA is active it's called by 'handle' method
     #endif
@@ -1034,9 +1107,11 @@ void loop() {
         temperatureTimer = curMillis + TEMPERATURE_REPORT_INTERVAL * 1000;
       }
     }
-  SendCommands();
-  ReceiveResponses();    
+  
   }
+ // lcd("communicate with printer" );
+  SendCommands();
+  ReceiveResponses();  
 
   //*******************
   //* Telnet handling *

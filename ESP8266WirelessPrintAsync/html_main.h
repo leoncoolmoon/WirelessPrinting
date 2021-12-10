@@ -1,4 +1,4 @@
-const  uint8_t index_html_gz[]=R"=====(
+const  uint8_t index_html[]=R"=====(
 <html>
 <body>
 <h1><!--#getDeviceName#--></h1>
@@ -26,4 +26,8 @@ function startFunction(command) {
 <p>WirelessPrinting <a href="https://github.com/probonopd/WirelessPrinting/commit/<!--#SKETCH_VERSION#-->"><!--#SKETCH_VERSION#--></a></p>
 <!--#OTA#-->
 </body></html>
+)=====";
+
+const  uint8_t E404_html[]=R"=====(
+<h1>Page not found!</h1>
 )=====";
